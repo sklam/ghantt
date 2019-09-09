@@ -7,10 +7,12 @@ from pprint import pprint
 from datetime import datetime
 import pickle
 from collections import OrderedDict
+import json
 
 from github3 import login
 from bokeh import plotting
-from bokeh.objects import HoverTool, ColumnDataSource
+from bokeh.models.tools import HoverTool
+from bokeh.models.sources import ColumnDataSource
 
 ###################################
 # User configurable settings
@@ -70,16 +72,17 @@ class Issue(object):
         return delta.days + delta.seconds/SECONDS_PER_DAY
 
 
-
 def iter_gh_issues(since=None):
     print("GH login")
     gh = login(GH_LOGIN_USER,
                getpass("password for {} > ".format(GH_LOGIN_USER)))
 
-    issues = gh.iter_repo_issues(GH_USER, GH_REPO, state='all',
-                                 since=since)
+    repo = gh.repository(GH_USER, GH_REPO)
+    issues = repo.issues(state='all', since=since)
     for raw_iss in issues:
-        yield raw_iss.to_json()
+        dat = raw_iss.as_dict()
+        print("reading", raw_iss.number)
+        yield dat
 
 
 def _generate():
@@ -92,6 +95,7 @@ def _generate():
 
     with open(DATA_FILE, "wb") as fout:
         pickle.dump(packed, fout)
+
 
 REDS = [
     '#FF7940',
@@ -120,6 +124,24 @@ def graph():
                          title="ghantt.py")
 
     numbers = [iss.number for iss in issues]
+    agos = [iss.ago for iss in issues]
+    tooltips = [
+        ("number", "@number"),
+        ("title", "@title"),
+        ("since", "@since"),
+        ("pull_request", "@pull_request"),
+    ]
+
+    p = plotting.figure(
+        title="{}/{}".format(GH_USER, GH_REPO),
+        y_range=(min(numbers), max(numbers)),
+        x_range=(min(agos), max(agos)),
+        width=800,
+        height=800,
+        tooltips=tooltips,
+    )
+    p.xaxis.axis_label = "days Before Current"
+    p.yaxis.axis_label = "issue number"
 
     source = ColumnDataSource(
         data=dict(
@@ -132,32 +154,10 @@ def graph():
             since = ["{} days".format(int(abs(iss.ago))) for iss in issues],
         ),
     )
-    plotting.hold()
-    plotting.rect("ago", "number", "length", 1, source=source,
-                  color="color", title="{}/{}".format(GH_USER, GH_REPO),
-                  y_range=(min(numbers), max(numbers)),
-                  tools="resize,hover,previewsave,pan,wheel_zoom",
-                  fill_alpha=0.8)
+    p.rect("ago", "number", "length", 1, source=source, color="color",
+           fill_alpha=0.8)
 
-    text_props = {
-        "source": source,
-        "angle": 0,
-        "color": "black",
-        "text_align": "left",
-        "text_baseline": "middle"
-    }
-
-    plotting.grid().grid_line_color = None
-
-    hover = [t for t in plotting.curplot().tools if isinstance(t, HoverTool)][0]
-    hover.tooltips = OrderedDict([
-        ("number", "@number"),
-        ("title", "@title"),
-        ("since", "@since"),
-        ("pull_request", "@pull_request"),
-    ])
-
-    plotting.show()
+    plotting.show(p)
 
 
 def fetch():
